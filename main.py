@@ -6,6 +6,7 @@ from screens.materiale_screen import materiale_screen
 from screens.operatiuni_screen import operatiuni_screen
 from screens.stocuri_screen import stocuri_screen
 
+
 def main(page: ft.Page):
     page.title = "StockPilot"
     page.theme_mode = ft.ThemeMode.LIGHT
