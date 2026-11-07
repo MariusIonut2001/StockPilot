@@ -188,3 +188,114 @@ def istoric_material(material_id: int) -> list[dict]:
         ).fetchall()
 
         return [dict(row) for row in rows]
+
+
+
+def inregistreaza_ajustare(
+        inventariere_id: int,
+        motiv: str,
+) -> int:
+    """
+    Aplică diferența unei inventarieri asupra stocului scriptic.
+
+    Diferența pozitivă generează o intrare.
+    Diferența negativă generează o ieșire.
+
+    O inventariere poate fi ajustată o singură dată.
+    Returnează ID-ul mișcării de ajustare.
+    """
+
+    motiv = motiv.strip() if motiv else ""
+
+    if not motiv:
+        raise ValueError("Motivul ajustării este obligatoriu.")
+
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+
+        inventariere = connection.execute(
+            """
+            SELECT
+                i.id,
+                i.material_id,
+                i.diferenta
+            FROM inventarieri i
+            WHERE i.id = ?
+            """,
+            (inventariere_id,),
+        ).fetchone()
+
+        if inventariere is None:
+            raise ValueError("Inventarierea selectată nu există.")
+
+        material_id = inventariere["material_id"]
+        diferenta = float(inventariere["diferenta"])
+
+        _verifica_material(connection, material_id)
+
+        if diferenta == 0:
+            raise ValueError(
+                "Nu există nicio diferență de ajustat."
+            )
+
+        ajustare_existenta = connection.execute(
+            """
+            SELECT id
+            FROM miscari_stoc
+            WHERE inventariere_id = ?
+            """,
+            (inventariere_id,),
+        ).fetchone()
+
+        if ajustare_existenta is not None:
+            raise ValueError(
+                "Această inventariere a fost deja ajustată."
+            )
+
+        cantitate = abs(diferenta)
+        sens = 1 if diferenta > 0 else -1
+
+        # Verificăm stocul actual pentru a nu permite
+        # o ajustare negativă care ar duce stocul sub zero.
+        rezultat = connection.execute(
+            """
+            SELECT COALESCE(SUM(cantitate * sens), 0) AS stoc
+            FROM miscari_stoc
+            WHERE material_id = ?
+            """,
+            (material_id,),
+        ).fetchone()
+
+        stoc_actual = float(rezultat["stoc"])
+
+        if sens == -1 and cantitate > stoc_actual:
+            raise ValueError(
+                f"Ajustarea ar duce stocul sub zero. "
+                f"Stoc actual: {stoc_actual:g}, "
+                f"ajustare solicitată: {cantitate:g}."
+            )
+
+        cursor = connection.execute(
+            """
+            INSERT INTO miscari_stoc (
+                material_id,
+                tip,
+                cantitate,
+                sens,
+                data_operatiunii,
+                motiv,
+                inventariere_id
+            )
+            VALUES (?, 'AJUSTARE', ?, ?, ?, ?, ?)
+            """,
+            (
+                material_id,
+                cantitate,
+                sens,
+                _data_curenta(),
+                motiv,
+                inventariere_id,
+            ),
+        )
+
+        return cursor.lastrowid

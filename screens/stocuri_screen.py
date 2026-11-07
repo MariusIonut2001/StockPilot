@@ -4,7 +4,10 @@ from datetime import datetime
 
 from services.gestiuni_service import lista_gestiuni
 from services.materiale_service import lista_materiale
-from services.operatiuni_service import stoc_scriptic
+from services.operatiuni_service import (
+    stoc_scriptic,
+    inregistreaza_ajustare,
+)
 from services.inventariere_service import (
     lista_inventarieri,
     inregistreaza_inventariere,
@@ -33,18 +36,9 @@ def stocuri_screen(page: ft.Page):
         label="Tip de materiale",
         value="TOATE",
         options=[
-            ft.dropdown.Option(
-                key="TOATE",
-                text="Toate materialele",
-            ),
-            ft.dropdown.Option(
-                key="CU_STOC",
-                text="Doar materiale cu stoc pozitiv",
-            ),
-            ft.dropdown.Option(
-                key="FARA_STOC",
-                text="Materiale fără stoc",
-            ),
+            ft.dropdown.Option(key="TOATE", text="Toate materialele"),
+            ft.dropdown.Option(key="CU_STOC", text="Doar materiale cu stoc pozitiv"),
+            ft.dropdown.Option(key="FARA_STOC", text="Materiale fără stoc"),
         ],
         width=400,
     )
@@ -60,7 +54,8 @@ def stocuri_screen(page: ft.Page):
     mesaj = ft.Text()
     total_text = ft.Text()
 
-    # Formularul de inventariere
+    # FORMULAR INVENTARIERE
+
     titlu_inventariere = ft.Text(
         "Înregistrare inventariere",
         size=18,
@@ -96,56 +91,6 @@ def stocuri_screen(page: ft.Page):
     )
 
     mesaj_inventariere = ft.Text()
-
-    formular_inventariere = ft.Container(
-        visible=False,
-        padding=15,
-        border=ft.Border.all(
-            1,
-            ft.Colors.OUTLINE_VARIANT,
-        ),
-        border_radius=10,
-        content=ft.Column(
-            controls=[
-                titlu_inventariere,
-                material_inventariere_text,
-                cantitate_faptica,
-
-                ft.Row(
-                    controls=[
-                        data_inventarierii,
-                        ft.Button(
-                            "Data de azi",
-                            icon=ft.Icons.CALENDAR_TODAY,
-                            on_click=completeaza_data_curenta,
-                        ),
-                    ],
-                    wrap=True,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-
-                observatii,
-
-                ft.Row(
-                    controls=[
-                        ft.Button(
-                            "Salvează inventarierea",
-                            icon=ft.Icons.SAVE,
-                            on_click=lambda e: salveaza_inventarierea(e),
-                        ),
-                        ft.TextButton(
-                            "Anulează",
-                            on_click=lambda e: inchide_formular(),
-                        ),
-                    ],
-                    wrap=True,
-                ),
-
-                mesaj_inventariere,
-            ],
-            spacing=10,
-        ),
-    )
 
     def inchide_formular():
         nonlocal material_selectat
@@ -218,6 +163,224 @@ def stocuri_screen(page: ft.Page):
             mesaj_inventariere.color = ft.Colors.RED
             page.update()
 
+    formular_inventariere = ft.Container(
+        visible=False,
+        padding=15,
+        border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+        border_radius=10,
+        content=ft.Column(
+            controls=[
+                titlu_inventariere,
+                material_inventariere_text,
+                cantitate_faptica,
+                ft.Row(
+                    controls=[
+                        data_inventarierii,
+                        ft.Button(
+                            "Data de azi",
+                            icon=ft.Icons.CALENDAR_TODAY,
+                            on_click=completeaza_data_curenta,
+                        ),
+                    ],
+                    wrap=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                observatii,
+                ft.Row(
+                    controls=[
+                        ft.Button(
+                            "Salvează inventarierea",
+                            icon=ft.Icons.SAVE,
+                            on_click=salveaza_inventarierea,
+                        ),
+                        ft.TextButton(
+                            "Anulează",
+                            on_click=lambda e: inchide_formular(),
+                        ),
+                    ],
+                    wrap=True,
+                ),
+                mesaj_inventariere,
+            ],
+            spacing=10,
+        ),
+    )
+
+    # CONSTRUIRE RÂND DIN ISTORICUL INVENTARIERILOR
+
+    def construieste_rand_inventariere(inventariere):
+        diferenta_initiala = float(inventariere["diferenta"])
+        inventariere_id = inventariere["id"]
+        ajustare_id = inventariere.get("ajustare_id")
+
+        # După aplicarea ajustării, diferența afișată devine zero.
+        diferenta = (
+            0 if ajustare_id is not None else diferenta_initiala
+        )
+
+        motiv_ajustare = ft.TextField(
+            label="Motivul ajustării",
+            hint_text="Explică motivul diferenței",
+            multiline=True,
+            min_lines=2,
+            max_lines=3,
+        )
+
+        mesaj_ajustare = ft.Text()
+
+        formular_ajustare = ft.Container(
+            visible=False,
+            content=ft.Column(
+                controls=[
+                    motiv_ajustare,
+                    ft.Button(
+                        "Confirmă ajustarea",
+                        icon=ft.Icons.CHECK,
+                        on_click=lambda e, iid=inventariere_id:
+                            aplica_ajustarea(iid),
+                    ),
+                    mesaj_ajustare,
+                ],
+                spacing=8,
+            ),
+        )
+
+        def aplica_ajustarea(iid):
+            try:
+                motiv = (motiv_ajustare.value or "").strip()
+
+                if not motiv:
+                    raise ValueError(
+                        "Motivul ajustării este obligatoriu."
+                    )
+
+                inregistreaza_ajustare(
+                    inventariere_id=iid,
+                    motiv=motiv,
+                )
+
+                cauta_materiale()
+
+            except (ValueError, TypeError) as eroare:
+                mesaj_ajustare.value = str(eroare)
+                mesaj_ajustare.color = ft.Colors.RED
+                page.update()
+
+            except Exception as eroare:
+                mesaj_ajustare.value = f"Eroare: {eroare}"
+                mesaj_ajustare.color = ft.Colors.RED
+                page.update()
+
+        def arata_formular_ajustare(e=None):
+            formular_ajustare.visible = not formular_ajustare.visible
+            page.update()
+
+        if diferenta > 0:
+            diferenta_text = f"+{diferenta:g}"
+            diferenta_color = ft.Colors.GREEN
+        elif diferenta < 0:
+            diferenta_text = f"{diferenta:g}"
+            diferenta_color = ft.Colors.RED
+        else:
+            diferenta_text = "0"
+            diferenta_color = ft.Colors.GREY
+
+        controale_ajustare = []
+
+        if ajustare_id is not None:
+            controale_ajustare.append(
+                ft.Text(
+                    f"Ajustare aplicată (mișcare #{ajustare_id})",
+                    color=ft.Colors.GREEN,
+                    weight=ft.FontWeight.BOLD,
+                    size=12,
+                )
+            )
+
+        elif diferenta == 0:
+            controale_ajustare.append(
+                ft.Text(
+                    "Fără diferențe – nu este necesară ajustarea.",
+                    color=ft.Colors.GREY,
+                    size=12,
+                )
+            )
+
+        else:
+            controale_ajustare.extend([
+                ft.Button(
+                    "Aplică ajustarea",
+                    icon=ft.Icons.BALANCE,
+                    on_click=arata_formular_ajustare,
+                ),
+                formular_ajustare,
+            ])
+
+        continut = [
+            ft.Text(
+                f'Data: {inventariere["data_inventarierii"]}',
+                weight=ft.FontWeight.BOLD,
+            ),
+            ft.Row(
+                controls=[
+                    ft.Column(
+                        controls=[
+                            ft.Text("Scriptic", size=11),
+                            ft.Text(
+                                f'{inventariere["cantitate_scriptica"]:g}',
+                                weight=ft.FontWeight.BOLD,
+                            ),
+                        ],
+                        spacing=2,
+                    ),
+                    ft.Column(
+                        controls=[
+                            ft.Text("Faptic", size=11),
+                            ft.Text(
+                                f'{inventariere["cantitate_faptica"]:g}',
+                                weight=ft.FontWeight.BOLD,
+                            ),
+                        ],
+                        spacing=2,
+                    ),
+                    ft.Column(
+                        controls=[
+                            ft.Text("Diferență", size=11),
+                            ft.Text(
+                                diferenta_text,
+                                weight=ft.FontWeight.BOLD,
+                                color=diferenta_color,
+                            ),
+                        ],
+                        spacing=2,
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            ),
+        ]
+
+        if inventariere.get("observatii"):
+            continut.append(
+                ft.Text(
+                    f'Observații: {inventariere["observatii"]}',
+                    size=12,
+                )
+            )
+
+        continut.extend(controale_ajustare)
+
+        return ft.Container(
+            content=ft.Column(
+                controls=continut,
+                spacing=8,
+            ),
+            padding=10,
+            border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+            border_radius=8,
+        )
+
+    # CĂUTARE ȘI AFIȘARE MATERIALE
+
     def cauta_materiale(e=None):
         lista.controls.clear()
         mesaj.value = ""
@@ -234,13 +397,20 @@ def stocuri_screen(page: ft.Page):
                 int(gestiune_selectata.value)
             )
 
-            # Preluăm istoricul inventarierilor.
             inventarieri = lista_inventarieri()
 
+            inventarieri_materiale = {}
             ultima_inventariere = {}
 
             for inventariere in inventarieri:
                 material_id = inventariere["material_id"]
+
+                if material_id not in inventarieri_materiale:
+                    inventarieri_materiale[material_id] = []
+
+                inventarieri_materiale[material_id].append(
+                    inventariere
+                )
 
                 if material_id not in ultima_inventariere:
                     ultima_inventariere[material_id] = inventariere
@@ -271,12 +441,20 @@ def stocuri_screen(page: ft.Page):
 
                 if inventariere:
                     faptic = inventariere["cantitate_faptica"]
-                    diferenta = inventariere["diferenta"]
+                    ajustare_id = inventariere.get("ajustare_id")
+
+                    if ajustare_id is not None:
+                        diferenta = 0
+                    else:
+                        diferenta = inventariere["diferenta"]
+
                     data = inventariere["data_inventarierii"]
+
                 else:
                     faptic = None
                     diferenta = None
                     data = None
+                    ajustare_id = None
 
                 rezultate.append({
                     "id": material["id"],
@@ -287,11 +465,10 @@ def stocuri_screen(page: ft.Page):
                     "faptic": faptic,
                     "diferenta": diferenta,
                     "data": data,
+                    "ajustare_id": ajustare_id,
                 })
 
-            total_text.value = (
-                f"Rezultate găsite: {len(rezultate)}"
-            )
+            total_text.value = f"Rezultate găsite: {len(rezultate)}"
 
             if not rezultate:
                 mesaj.value = (
@@ -305,6 +482,7 @@ def stocuri_screen(page: ft.Page):
                     diferenta_text = "—"
                     diferenta_color = ft.Colors.GREY
                     data_text = "Nu există inventariere"
+
                 else:
                     faptic_text = f'{material["faptic"]:g}'
                     diferenta_text = f'{material["diferenta"]:+g}'
@@ -319,6 +497,32 @@ def stocuri_screen(page: ft.Page):
                     data_text = (
                         f'Ultima inventariere: {material["data"]}'
                     )
+
+                istoric_material = inventarieri_materiale.get(
+                    material["id"],
+                    [],
+                )
+
+                randuri_istoric = [
+                    construieste_rand_inventariere(inv)
+                    for inv in istoric_material
+                ]
+
+                continut_istoric = ft.Column(
+                    controls=randuri_istoric or [
+                        ft.Text("Nu există inventarieri înregistrate.")
+                    ],
+                    spacing=8,
+                )
+
+                container_istoric = ft.Container(
+                    visible=False,
+                    content=continut_istoric,
+                )
+
+                def comuta_istoric(e=None, container=container_istoric):
+                    container.visible = not container.visible
+                    page.update()
 
                 lista.controls.append(
                     ft.Container(
@@ -349,9 +553,7 @@ def stocuri_screen(page: ft.Page):
                                                 deschide_formular(m),
                                         ),
                                     ],
-                                    vertical_alignment=(
-                                        ft.CrossAxisAlignment.CENTER
-                                    ),
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
 
                                 ft.Divider(height=1),
@@ -360,10 +562,7 @@ def stocuri_screen(page: ft.Page):
                                     controls=[
                                         ft.Column(
                                             controls=[
-                                                ft.Text(
-                                                    "Scriptic",
-                                                    size=11,
-                                                ),
+                                                ft.Text("Scriptic", size=11),
                                                 ft.Text(
                                                     f'{material["stoc"]:g}',
                                                     size=19,
@@ -374,10 +573,7 @@ def stocuri_screen(page: ft.Page):
                                         ),
                                         ft.Column(
                                             controls=[
-                                                ft.Text(
-                                                    "Faptic",
-                                                    size=11,
-                                                ),
+                                                ft.Text("Faptic", size=11),
                                                 ft.Text(
                                                     faptic_text,
                                                     size=19,
@@ -388,10 +584,7 @@ def stocuri_screen(page: ft.Page):
                                         ),
                                         ft.Column(
                                             controls=[
-                                                ft.Text(
-                                                    "Diferență",
-                                                    size=11,
-                                                ),
+                                                ft.Text("Diferență", size=11),
                                                 ft.Text(
                                                     diferenta_text,
                                                     size=19,
@@ -402,9 +595,7 @@ def stocuri_screen(page: ft.Page):
                                             spacing=2,
                                         ),
                                     ],
-                                    alignment=(
-                                        ft.MainAxisAlignment.SPACE_BETWEEN
-                                    ),
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                 ),
 
                                 ft.Text(
@@ -412,6 +603,16 @@ def stocuri_screen(page: ft.Page):
                                     size=11,
                                     color=ft.Colors.GREY_600,
                                 ),
+
+                                ft.Divider(height=1),
+
+                                ft.TextButton(
+                                    "Vezi istoricul inventarierilor",
+                                    icon=ft.Icons.HISTORY,
+                                    on_click=comuta_istoric,
+                                ),
+
+                                container_istoric,
                             ],
                             spacing=8,
                         ),
