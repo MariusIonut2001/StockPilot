@@ -80,10 +80,17 @@ def init_db():
                 observatii TEXT,
                 motiv TEXT,
                 miscare_referinta_id INTEGER,
-                FOREIGN KEY (material_id) REFERENCES materiale(id),
-                FOREIGN KEY (destinatar_id) REFERENCES destinatari(id),
+                inventariere_id INTEGER,
+
+                FOREIGN KEY (material_id)
+                    REFERENCES materiale(id),
+                FOREIGN KEY (destinatar_id)
+                    REFERENCES destinatari(id),
                 FOREIGN KEY (miscare_referinta_id)
                     REFERENCES miscari_stoc(id),
+                FOREIGN KEY (inventariere_id)
+                    REFERENCES inventarieri(id),
+
                 UNIQUE (miscare_referinta_id)
             );
 
@@ -97,7 +104,9 @@ def init_db():
                 diferenta REAL NOT NULL,
                 observatii TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (material_id) REFERENCES materiale(id)
+
+                FOREIGN KEY (material_id)
+                    REFERENCES materiale(id)
             );
 
             CREATE INDEX IF NOT EXISTS idx_materiale_gestiune
@@ -113,6 +122,32 @@ def init_db():
                 ON inventarieri(material_id, data_inventarierii);
         """)
 
+        # MIGRARE:
+        # Verificăm dacă noua coloană există deja.
+        coloane = connection.execute(
+            "PRAGMA table_info(miscari_stoc)"
+        ).fetchall()
+
+        nume_coloane = [coloana["name"] for coloana in coloane]
+
+        # Dacă baza de date este una mai veche, adăugăm coloana.
+        if "inventariere_id" not in nume_coloane:
+            connection.execute("""
+                ALTER TABLE miscari_stoc
+                ADD COLUMN inventariere_id INTEGER
+                REFERENCES inventarieri(id)
+            """)
+
+        # O inventariere poate genera maximum o ajustare.
+        # Înregistrările fără inventariere asociată sunt permise.
+        connection.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS
+            idx_miscari_inventariere_unica
+            ON miscari_stoc(inventariere_id)
+            WHERE inventariere_id IS NOT NULL
+        """)
+
+
 def verify_tables():
     with get_connection() as connection:
         rows = connection.execute("""
@@ -124,6 +159,7 @@ def verify_tables():
         """).fetchall()
 
         print("Tabele existente:")
+
         for row in rows:
             print(f"- {row['name']}")
 
